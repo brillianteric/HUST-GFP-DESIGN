@@ -1,0 +1,31 @@
+# Runtime outputs
+outputs/
+logs/
+slurm-*.out
+*.out
+
+# AlphaFold 3 heavy outputs
+*_stage1_output/
+*_stage2_output/
+*_stage2_model_pdb/
+*_slurms_output/
+**/seed-*_sample-*/
+**/*_confidences.json
+**/*_summary_confidences.json
+**/*_model.cif
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local configuration
+.env
+config.local.*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
