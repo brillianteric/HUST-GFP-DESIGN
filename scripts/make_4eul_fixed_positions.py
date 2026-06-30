@@ -176,7 +176,7 @@ def main() -> int:
     row = {
         "target": TARGET,
         "chain": CHAIN,
-        "pdb_file": str(args.pdb),
+        "pdb_file": args.pdb.as_posix(),
         "chromophore": ";".join(chromo_labels),
         "cutoff_A": args.cutoff,
         "seq_len": len(sequence),

@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE:
+# This is an example SLURM template used for the 4EUL workflow.
+# Edit partition names, module names, bind paths, and external tool paths
+# before running on a different HPC cluster.
 set -euo pipefail
 
 STAGE="${1:?Usage: $0 stage1|stage2 JSON_LIST OUTPUT_DIR [START_ID] [END_ID]}"

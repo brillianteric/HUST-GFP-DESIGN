@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE:
+# This is an example SLURM template used for the 4EUL workflow.
+# Edit partition names, module names, bind paths, and external tool paths
+# before running on a different HPC cluster.
 #SBATCH -J mpnn-4eul
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1

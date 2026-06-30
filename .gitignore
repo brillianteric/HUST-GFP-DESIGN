@@ -1,13 +1,37 @@
-# Runtime logs
+# Runtime outputs and logs
+outputs/
 logs/
 slurm-*.out
 *.out
+*.err
+
+# AlphaFold 3 / ProteinMPNN large external assets
+*.sif
+*.pt
+*.pth
+*.params
+*.cif.gz
+*.pkl
+*.npz
+
+# Common model/database directories
+models/
+database/
+databases/
+public_databases/
+af3_database/
+af3_models/
+checkpoints/
+model_weights/
 
 # Uncurated external run directories
 *_stage1_output/
 *_stage2_output/
 *_stage2_model_pdb/
 *_slurms_output/
+outputs/af3_stage1/
+outputs/af3_stage2/
+outputs/proteinmpnn_4eul/
 
 # Python
 __pycache__/
@@ -18,6 +42,7 @@ venv/
 # Local configuration
 .env
 config.local.*
+*.local.sh
 
 # OS/editor
 .DS_Store

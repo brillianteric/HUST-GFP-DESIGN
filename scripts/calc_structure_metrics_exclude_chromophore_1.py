@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
+import argparse
 import csv
 import json
 import math
@@ -11,8 +12,7 @@ import numpy as np
 from Bio.PDB import PDBParser, Superimposer
 
 
-# =========================
-# 鐢ㄦ埛鍙慨鏀瑰弬鏁?# =========================
+# Default paths for the 4EUL structure-metric workflow.
 DESIGN_PDB_DIR = Path("results/example_models")
 TARGET_PDB_DIR = Path("data/raw")
 CONFIDENCE_DIR = Path("outputs/af3_stage2")
@@ -20,20 +20,19 @@ WT_SCORE_FASTA = Path("data/proteinmpnn/4EUL_designs.fa")
 
 OUT_CSV = Path("results/metrics/4EUL_structure_metrics_with_plddt_pae.csv")
 
-# 璁捐缁撴瀯鏂囦欢鏍煎紡锛?# $DESIGN_PREFIX_{pdb_id}_{rank}_{score}_model.pdb
+# Design PDB file format: {DESIGN_PREFIX}{pdb_id}_{rank}_{score}_model.pdb
 DESIGN_PREFIX = ""
 DESIGN_SUFFIX = "_model.pdb"
 
-# 浼樺厛姣旇緝鐨勯摼
+# Preferred chain for CA extraction and alignment.
 PREFERRED_CHAIN_ID = "A"
 
-# 杩欎簺浣嶇疆鏄璁＄粨鏋?/ MPNN 杈撳嚭搴忓垪涓殑 1-based 浣嶇疆
 # 4EUL-only: exclude the chromophore-forming tripeptide from the design CA list.
 EXCLUDE_DESIGN_POSITIONS = {
     "4EUL": [63, 64, 65],
 }
 
-# 濡傛灉鎺掗櫎鍚庝笁鑰呴暱搴︿粛涓嶄竴鑷达紝鏄惁鐢?min length 鎴柇缁х画璁＄畻
+# If lengths still differ after exclusion, truncate to the shared length.
 ALLOW_TRUNCATE_IF_LENGTH_MISMATCH = True
 
 
@@ -55,7 +54,12 @@ def choose_chain(model, preferred_chain_id="A"):
 
 def get_ca_coords(pdb_path: Path, preferred_chain_id="A"):
     """
-    鎻愬彇鎸囧畾 PDB 绗竴妯″瀷銆佹寚瀹氶摼涓殑 CA 鍧愭爣銆?    娉ㄦ剰锛?    - 璺宠繃姘淬€佺瀛愩€佸皬鍒嗗瓙锛?    - 灏ゅ叾璺宠繃 4EUL 涓殑閽欑瀛?CA锛?    - 涓嶄娇鐢?STANDARD_AA 鐧藉悕鍗曪紝閬垮厤鐮村潖鍘熸湁椤哄簭瀵归綈閫昏緫銆?    """
+    Extract CA coordinates from the preferred chain in the first PDB model.
+
+    Water, ions, and common small molecules are skipped. The parser avoids a
+    strict standard-amino-acid whitelist so residue order stays compatible with
+    chromophore-aware preprocessing.
+    """
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure(pdb_path.stem, str(pdb_path))
     model = get_first_model(structure)
@@ -74,7 +78,6 @@ def get_ca_coords(pdb_path: Path, preferred_chain_id="A"):
         hetflag, resseq, icode = residue.id
         resname = residue.get_resname().strip()
 
-        # 鎺掗櫎姘淬€佺瀛愩€佸皬鍒嗗瓙锛屽挨鍏舵槸 4EUL 閲岀殑閽欑瀛?CA
         if resname in SKIP_RESNAMES:
             continue
 
@@ -95,8 +98,7 @@ def get_ca_coords(pdb_path: Path, preferred_chain_id="A"):
 
 
 def remove_positions_by_1based(coords: np.ndarray, remove_positions: list[int]):
-    """
-    浠?design CA 鍧愭爣涓垹闄ゆ寚瀹?1-based 搴忓垪浣嶇疆銆?    """
+    """Remove 1-based sequence positions from a CA coordinate array."""
     if len(coords) == 0:
         return coords
 
@@ -110,8 +112,7 @@ def remove_positions_by_1based(coords: np.ndarray, remove_positions: list[int]):
 
 
 def kabsch_superpose_rmsd(mobile_coords, target_coords):
-    """
-    瀵?mobile -> target 鍋?Kabsch superposition锛岃繑鍥?RMSD 鍜屽彉鎹㈠悗鐨?mobile 鍧愭爣銆?    """
+    """Superpose mobile coordinates onto target coordinates and return RMSD."""
 
     if len(mobile_coords) != len(target_coords):
         raise ValueError(
@@ -146,8 +147,9 @@ def kabsch_superpose_rmsd(mobile_coords, target_coords):
 
 def approximate_tm_score(transformed_mobile_coords, target_coords, norm_len):
     """
-    杩戜技 C伪 TM-score銆?
-    娉ㄦ剰锛?    杩欐槸鍦ㄥ凡鏈?residue 椤哄簭瀵归綈鍜?Kabsch superposition 鍚庤绠楃殑 approximate TM-score锛?    涓嶆槸 US-align / TMscore 瀹樻柟宸ュ叿鐨勫畬鏁寸粨鏋勬瘮瀵圭粨鏋溿€?    """
+    Approximate a CA TM-score after sequential residue alignment and Kabsch
+    superposition. This is not a replacement for official TMscore/US-align.
+    """
     if len(target_coords) == 0:
         return float("nan")
 
@@ -167,9 +169,9 @@ def approximate_tm_score(transformed_mobile_coords, target_coords, norm_len):
 
 def parse_design_filename(design_path: Path, target_ids: list[str]):
     """
-    浠?fixed_{pdb_id}_{rank}_{score}_model.pdb 瑙ｆ瀽 pdb_id / rank / score銆?
-    鏀寔灏忓啓璁捐鏂囦欢鍚嶅尮閰嶅ぇ鍐?target PDB锛?      fixed_4oqw_a_rank01_score0.7287_model.pdb
-      -> 4EUL.pdb
+    Parse target ID, rank, and MPNN score from a design PDB filename.
+
+    The matching is case-insensitive against target PDB IDs.
     """
     name = design_path.name
 
@@ -219,11 +221,14 @@ def compare_design_to_target_excluding_chromophore(
     design_pdb: Path,
     target_pdb: Path,
     pdb_id: str,
+    preferred_chain_id: str,
 ):
     """
-    璺嚎 B锛?    浠?design 缁撴瀯涓垹闄?chromophore-forming tripeptide 瀵瑰簲 CA锛?    鍐嶅拰鍘熷 target PDB 鐨?CA 鎸夐『搴忔瘮瀵广€?    """
-    target = get_ca_coords(target_pdb, PREFERRED_CHAIN_ID)
-    design = get_ca_coords(design_pdb, PREFERRED_CHAIN_ID)
+    Remove CA positions corresponding to the chromophore-forming tripeptide
+    from the design structure, then compare sequentially to the target PDB.
+    """
+    target = get_ca_coords(target_pdb, preferred_chain_id)
+    design = get_ca_coords(design_pdb, preferred_chain_id)
 
     target_coords_all = target["coords"]
     design_coords_all = design["coords"]
@@ -343,7 +348,7 @@ def extract_confidence_metrics(conf_json: Path):
     return {
         "atom_plddt_mean": atom_plddt_mean,
         "pae_mean": pae_mean,
-        "confidence_json": str(conf_json),
+        "confidence_json": conf_json.as_posix(),
         "score_from_conf_name": score_from_conf_name,
         "confidence_matched": 1,
     }
@@ -368,35 +373,50 @@ def build_confidence_map(confidence_dir: Path):
     return conf_map
 
 
-def main():
-    if not DESIGN_PDB_DIR.exists():
-        raise FileNotFoundError(f"Design PDB dir not found: {DESIGN_PDB_DIR}")
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Calculate 4EUL structure metrics after excluding the chromophore-forming tripeptide."
+    )
+    parser.add_argument("--design-pdb-dir", type=Path, default=DESIGN_PDB_DIR)
+    parser.add_argument("--target-pdb-dir", type=Path, default=TARGET_PDB_DIR)
+    parser.add_argument("--confidence-dir", type=Path, default=CONFIDENCE_DIR)
+    parser.add_argument("--wt-score-fasta", type=Path, default=WT_SCORE_FASTA)
+    parser.add_argument("--out-csv", type=Path, default=OUT_CSV)
+    parser.add_argument("--preferred-chain", default=PREFERRED_CHAIN_ID)
+    return parser.parse_args()
 
-    if not TARGET_PDB_DIR.exists():
-        raise FileNotFoundError(f"Target PDB dir not found: {TARGET_PDB_DIR}")
+
+def main():
+    args = parse_args()
+
+    if not args.design_pdb_dir.exists():
+        raise FileNotFoundError(f"Design PDB dir not found: {args.design_pdb_dir}")
+
+    if not args.target_pdb_dir.exists():
+        raise FileNotFoundError(f"Target PDB dir not found: {args.target_pdb_dir}")
 
     target_pdbs = {
         p.stem: p
-        for p in sorted(TARGET_PDB_DIR.glob("*.pdb"))
+        for p in sorted(args.target_pdb_dir.glob("*.pdb"))
     }
 
     target_ids = sorted(target_pdbs.keys())
 
     if not target_pdbs:
-        raise FileNotFoundError(f"No target PDB files found in: {TARGET_PDB_DIR}")
+        raise FileNotFoundError(f"No target PDB files found in: {args.target_pdb_dir}")
 
-    design_pdbs = sorted(DESIGN_PDB_DIR.glob("*.pdb"))
+    design_pdbs = sorted(args.design_pdb_dir.glob("*.pdb"))
 
     print("========== INPUT ==========")
-    print(f"[INFO] Design PDB dir : {DESIGN_PDB_DIR}")
-    print(f"[INFO] Target PDB dir : {TARGET_PDB_DIR}")
-    print(f"[INFO] Output CSV     : {OUT_CSV}")
+    print(f"[INFO] Design PDB dir : {args.design_pdb_dir}")
+    print(f"[INFO] Target PDB dir : {args.target_pdb_dir}")
+    print(f"[INFO] Output CSV     : {args.out_csv}")
     print(f"[INFO] Target PDBs    : {len(target_pdbs)}")
     print(f"[INFO] Design PDBs    : {len(design_pdbs)}")
     print(f"[INFO] Method         : exclude chromophore tripeptide from design CA, then sequential CA alignment")
 
-    wt_mpnn_score = read_wt_mpnn_score(WT_SCORE_FASTA)
-    confidence_by_rank = build_confidence_map(CONFIDENCE_DIR)
+    wt_mpnn_score = read_wt_mpnn_score(args.wt_score_fasta)
+    confidence_by_rank = build_confidence_map(args.confidence_dir)
 
     rows = []
 
@@ -426,6 +446,7 @@ def main():
                 design_pdb=design_pdb,
                 target_pdb=target_pdb,
                 pdb_id=pdb_id,
+                preferred_chain_id=args.preferred_chain,
             )
 
             row = {
@@ -434,8 +455,8 @@ def main():
                 "rank": parsed["rank"],
                 "mpnn_score_from_name": parsed["mpnn_score_from_name"],
                 **metrics,
-                "design_file": str(design_pdb),
-                "target_file": str(target_pdb),
+                "design_file": design_pdb.as_posix(),
+                "target_file": target_pdb.as_posix(),
             }
             row.update(
                 confidence_by_rank.get(
@@ -469,7 +490,7 @@ def main():
             n_fail += 1
             print(f"[FAIL] {design_pdb.name}: {e}")
 
-    OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
+    args.out_csv.parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = [
         "pdb_id",
@@ -501,7 +522,7 @@ def main():
         "confidence_matched",
     ]
 
-    with OUT_CSV.open("w", newline="", encoding="utf-8") as f:
+    with args.out_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
@@ -511,7 +532,7 @@ def main():
     print(f"[INFO] Failed         : {n_fail}")
     print(f"[INFO] Skip name      : {n_skip_name}")
     print(f"[INFO] Missing target : {n_missing_target}")
-    print(f"[INFO] Output CSV     : {OUT_CSV}")
+    print(f"[INFO] Output CSV     : {args.out_csv}")
 
 
 if __name__ == "__main__":

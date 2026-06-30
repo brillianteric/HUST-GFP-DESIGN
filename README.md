@@ -44,6 +44,8 @@ outputs/                       Runtime outputs generated during reproduction;
                                ignored by git unless explicitly curated
 ```
 
+The repository includes curated metrics, selected candidates, and representative example structures under `results/`. Raw AF3 runtime outputs under `outputs/` are generated locally during reproduction and are not required for inspecting the submitted final candidates.
+
 ---
 
 ## External Dependencies Not Included
@@ -242,6 +244,10 @@ Set the local AF3 paths:
 export AF3_BASEDIR=/path/to/AlphaFold-v3.0.0-Apptainer
 export AF3_DB_DIR=/path/to/alphafold3/database
 export AF3_MODEL_DIR=/path/to/alphafold3/models
+export AF3_RUNTIME=apptainer
+# or:
+# export AF3_RUNTIME=singularity
+export AF3_EXTRA_BINDS="/work /public $(pwd)"
 ```
 
 The helper scripts in `hpc/` only wrap the standard AF3 two-stage execution pattern. They do not provide AF3 itself.
@@ -307,13 +313,21 @@ Large raw AF3 runtime outputs are ignored by git unless manually curated into `r
 After AF3 stage 2 finishes, convert predicted mmCIF models to PDB files:
 
 ```bash
-python scripts/convert_all_af3_cif_to_pdb.py
+python scripts/convert_all_af3_cif_to_pdb.py \
+  --af3-output-dir outputs/af3_stage2 \
+  --out-pdb-dir results/example_models
 ```
 
 Compute 4EUL structure-level metrics and merge AF3 confidence metrics:
 
 ```bash
-python scripts/calc_structure_metrics_exclude_chromophore_1.py
+python scripts/calc_structure_metrics_exclude_chromophore_1.py \
+  --design-pdb-dir results/example_models \
+  --target-pdb-dir data/raw \
+  --confidence-dir outputs/af3_stage2 \
+  --wt-score-fasta data/proteinmpnn/4EUL_designs.fa \
+  --out-csv results/metrics/4EUL_structure_metrics_with_plddt_pae.csv \
+  --preferred-chain A
 ```
 
 The `--confidence-dir` should point to raw AF3 stage 2 outputs containing
@@ -324,7 +338,15 @@ filtering cannot be fully reproduced from scratch.
 Compute chromophore microenvironment metrics:
 
 ```bash
-python scripts/compute_microenv_metrics.py
+python scripts/compute_microenv_metrics.py \
+  --native-dir data/raw \
+  --pred-dir results/example_models \
+  --out-csv results/metrics/4EUL_microenv_metrics.csv \
+  --chain-id A \
+  --shell5-cutoff 5.0 \
+  --shell8-cutoff 8.0 \
+  --clash-cutoff 2.0 \
+  --contact-cutoff 4.0
 ```
 
 Expected metric outputs:
@@ -481,7 +503,7 @@ Please cite the relevant original resources when using this workflow or derived 
 * Protein Data Bank;
 * the original 4EUL structure source.
 
-A project license file should be added before public release. Third-party tools, model parameters, databases, and structures remain subject to their own licenses and terms of use.
+The project-specific scripts in this repository are released under the MIT License unless otherwise stated. Third-party tools, model parameters, databases, and structures remain subject to their own licenses and terms of use.
 
 ---
 

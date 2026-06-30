@@ -1,18 +1,16 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-璁＄畻鑽у厜铔嬬櫧璁捐缁撴瀯鐨勫彂鑹插洟寰幆澧冩寚鏍囷拷?
-鏍稿績鎸囨爣锟?1. rmsd_shell5_ca
-2. rmsd_shell8_ca
-3. chromo_clash_count_2A
-4. chromo_contact_F1
-5. shell5_mutation_count / shell5_mutation_rate
+"""Calculate chromophore microenvironment metrics for 4EUL designs.
 
-杈撳叆锟?- 鍘熷 PDB锛氬繀椤讳繚鐣欐垚鐔熷彂鑹插洟 CRO / CR2 / NRQ
-- AF3 棰勬祴 PDB锛氬凡杞垚 PDB 鐨勯娴嬬粨锟?"""
+Core metrics include shell 5 A CA RMSD, shell 8 A CA RMSD, chromophore
+clash count, chromophore contact F1, and shell 5 mutation count/rate.
+Native PDB files should retain the mature GFP chromophore residue
+records such as CRO, CR2, or NRQ. Predicted structures are expected as PDB.
+"""
 
 import csv
+import argparse
 import math
 import re
 from pathlib import Path
@@ -20,11 +18,7 @@ from pathlib import Path
 import numpy as np
 
 
-# ============================================================
-# 鐢ㄦ埛鍙傛暟鍖猴細鍙渶瑕佹敼杩欓噷
-# ============================================================
-
-# User parameters adapted for this repository.
+# Default paths and cutoffs for this repository.
 NATIVE_DIR = Path("data/raw")
 PRED_DIR = Path("results/example_models")
 OUT_CSV = Path("results/metrics/4EUL_microenv_metrics.csv")
@@ -37,9 +31,7 @@ CLASH_CUTOFF = 2.0
 CONTACT_CUTOFF = 4.0
 
 
-# ============================================================
-# 椤圭洰鍥哄畾淇℃伅
-# ============================================================
+# 4EUL-specific constants.
 
 CHROMO_RESNAMES = {"CRO", "CR2", "NRQ"}
 
@@ -47,7 +39,7 @@ TARGET_ALIASES = {
     "4eul": "4EUL",
 }
 
-# 锟?chromophore-aware parser 瑙ｆ瀽鍚庣殑鍙戣壊鍥㈠墠浣撲笁鑲戒綅缃紝1-based
+# 1-based positions of the chromophore-forming tripeptide after parser mapping.
 CHROMO_POSITIONS = {
     "4EUL": [63, 64, 65],
 }
@@ -72,9 +64,7 @@ EXCLUDE_RESNAMES = {
 }
 
 
-# ============================================================
-# 鍩虹鍑芥暟
-# ============================================================
+# Basic geometry helpers.
 
 def infer_element(atom_name, element_field):
     element = element_field.strip()
@@ -107,9 +97,7 @@ def rmsd(a, b):
 
 
 def kabsch(moving, fixed):
-    """
-    杩斿洖 R, t锛屼娇 moving_aligned = moving @ R + t
-    """
+    """Return R and t so that moving_aligned = moving @ R + t."""
     moving = np.asarray(moving, dtype=float)
     fixed = np.asarray(fixed, dtype=float)
 
@@ -141,9 +129,7 @@ def clean_float(x):
     return x
 
 
-# ============================================================
-# PDB 瑙ｆ瀽
-# ============================================================
+# PDB parsing.
 
 def parse_pdb_residues(pdb_path, chain_id="A"):
     residues = {}
@@ -216,7 +202,11 @@ def residue_label(res):
 
 def build_native_model(native_pdb, target, chain_id="A"):
     """
-    鍘熷 PDB 涓彂鑹插洟锟?CRO/CR2/NRQ锟?    杩欓噷鎶婃垚鐔熷彂鑹插洟杩樺師锟?3 锟?parsed positions锛屼互瀵归綈 ProteinMPNN/AF3 搴忓垪锟?    """
+    Build a sequence-indexed native model.
+
+    Mature chromophore residues are expanded back to the parent tripeptide
+    positions so native residues align with ProteinMPNN/AF3 sequence indices.
+    """
     residues = parse_pdb_residues(native_pdb, chain_id=chain_id)
 
     parsed = {}
@@ -316,9 +306,7 @@ def build_pred_model(pred_pdb, chain_id="A"):
     }
 
 
-# ============================================================
-# 鎸囨爣璁＄畻
-# ============================================================
+# Metric calculation.
 
 def get_shell_positions(native_model, cutoff):
     parsed = native_model["parsed"]
@@ -535,9 +523,7 @@ def calc_shell_mutation(native_model, pred_model, positions):
     return mutation, total, rate
 
 
-# ============================================================
-# 鏂囦欢璇嗗埆
-# ============================================================
+# File-name parsing and native-structure lookup.
 
 def infer_target_from_filename(pdb_path):
     stem = pdb_path.stem.lower()
@@ -599,18 +585,34 @@ def parse_rank_score(pdb_path):
 # main
 # ============================================================
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Calculate 4EUL chromophore microenvironment metrics.")
+    parser.add_argument("--native-dir", type=Path, default=NATIVE_DIR)
+    parser.add_argument("--pred-dir", type=Path, default=PRED_DIR)
+    parser.add_argument("--out-csv", type=Path, default=OUT_CSV)
+    parser.add_argument("--chain-id", default=CHAIN_ID)
+    parser.add_argument("--shell5-cutoff", type=float, default=SHELL5_CUTOFF)
+    parser.add_argument("--shell8-cutoff", type=float, default=SHELL8_CUTOFF)
+    parser.add_argument("--clash-cutoff", type=float, default=CLASH_CUTOFF)
+    parser.add_argument("--contact-cutoff", type=float, default=CONTACT_CUTOFF)
+    parser.add_argument("--no-recursive", action="store_true", help="Only scan PDB files directly under --pred-dir.")
+    return parser.parse_args()
+
+
 def main():
-    pred_files = sorted(PRED_DIR.rglob("*.pdb") if RECURSIVE else PRED_DIR.glob("*.pdb"))
+    args = parse_args()
+    recursive = not args.no_recursive
+    pred_files = sorted(args.pred_dir.rglob("*.pdb") if recursive else args.pred_dir.glob("*.pdb"))
 
     if not pred_files:
-        raise FileNotFoundError(f"No pdb files found in {PRED_DIR}")
+        raise FileNotFoundError(f"No pdb files found in {args.pred_dir}")
 
     print("========== compute_microenv_metrics ==========")
     print(f"[INFO] DESIGN_SET = {DESIGN_SET}")
-    print(f"[INFO] NATIVE_DIR = {NATIVE_DIR}")
-    print(f"[INFO] PRED_DIR   = {PRED_DIR}")
-    print(f"[INFO] OUT_CSV    = {OUT_CSV}")
-    print(f"[INFO] RECURSIVE  = {RECURSIVE}")
+    print(f"[INFO] NATIVE_DIR = {args.native_dir}")
+    print(f"[INFO] PRED_DIR   = {args.pred_dir}")
+    print(f"[INFO] OUT_CSV    = {args.out_csv}")
+    print(f"[INFO] RECURSIVE  = {recursive}")
     print(f"[INFO] pred files = {len(pred_files)}")
 
     native_cache = {}
@@ -630,15 +632,15 @@ def main():
 
         try:
             if target not in native_cache:
-                native_pdb = find_native_pdb(NATIVE_DIR, target)
+                native_pdb = find_native_pdb(args.native_dir, target)
 
                 if native_pdb is None:
                     raise FileNotFoundError(f"Cannot find native PDB for target={target}")
 
-                native_model = build_native_model(native_pdb, target, chain_id=CHAIN_ID)
+                native_model = build_native_model(native_pdb, target, chain_id=args.chain_id)
 
-                shell5 = get_shell_positions(native_model, SHELL5_CUTOFF)
-                shell8 = get_shell_positions(native_model, SHELL8_CUTOFF)
+                shell5 = get_shell_positions(native_model, args.shell5_cutoff)
+                shell8 = get_shell_positions(native_model, args.shell8_cutoff)
 
                 native_cache[target] = {
                     "native_pdb": native_pdb,
@@ -662,7 +664,7 @@ def main():
             shell5 = native_item["shell5"]
             shell8 = native_item["shell8"]
 
-            pred_model = build_pred_model(pred_pdb, chain_id=CHAIN_ID)
+            pred_model = build_pred_model(pred_pdb, chain_id=args.chain_id)
 
             R, t, align_positions = get_alignment(native_model, pred_model)
 
@@ -675,11 +677,11 @@ def main():
             )
 
             chromo_clash_count_2A, min_chromo_protein_dist = calc_chromo_clash(
-                native_model, pred_model, R, t, clash_cutoff=CLASH_CUTOFF
+                native_model, pred_model, R, t, clash_cutoff=args.clash_cutoff
             )
 
             contact_precision, contact_recall, contact_f1, native_contact_n, pred_contact_n = calc_contact_f1(
-                native_model, pred_model, R, t, contact_cutoff=CONTACT_CUTOFF
+                native_model, pred_model, R, t, contact_cutoff=args.contact_cutoff
             )
 
             shell5_mutation_count, shell5_mutation_total, shell5_mutation_rate = calc_shell_mutation(
@@ -691,8 +693,8 @@ def main():
             row = {
                 "design_set": DESIGN_SET,
                 "target": target,
-                "pred_file": str(pred_pdb),
-                "native_file": str(native_pdb),
+                "pred_file": pred_pdb.as_posix(),
+                "native_file": native_pdb.as_posix(),
                 "rank": rank,
                 "score_from_filename": score_from_name,
 
@@ -738,11 +740,11 @@ def main():
     if not rows:
         raise RuntimeError("No successful results. Please check file names and paths.")
 
-    OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
+    args.out_csv.parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = list(rows[0].keys())
 
-    with OUT_CSV.open("w", newline="") as f:
+    with args.out_csv.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -754,7 +756,7 @@ def main():
     print(f"[INFO] OK      : {ok}")
     print(f"[INFO] SKIPPED : {skipped}")
     print(f"[INFO] FAILED  : {failed}")
-    print(f"[OK] output CSV: {OUT_CSV}")
+    print(f"[OK] output CSV: {args.out_csv}")
 
 
 if __name__ == "__main__":
