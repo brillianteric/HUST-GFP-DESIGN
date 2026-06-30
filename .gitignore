@@ -1,18 +1,13 @@
-# Runtime outputs
-outputs/
+# Runtime logs
 logs/
 slurm-*.out
 *.out
 
-# AlphaFold 3 heavy outputs
+# Uncurated external run directories
 *_stage1_output/
 *_stage2_output/
 *_stage2_model_pdb/
 *_slurms_output/
-**/seed-*_sample-*/
-**/*_confidences.json
-**/*_summary_confidences.json
-**/*_model.cif
 
 # Python
 __pycache__/
